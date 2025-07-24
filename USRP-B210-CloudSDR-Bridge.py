@@ -1155,6 +1155,12 @@ class CloudSDREmulator:
             last_stats_time = start_time
             rate_samples = deque(maxlen=20)
             
+            # Pre-allocate arrays for 24-bit processing  
+            if is_24bit:
+                real_vals_24 = np.empty(samples_per_packet, dtype=np.float32)
+                imag_vals_24 = np.empty(samples_per_packet, dtype=np.float32)
+                real_int32 = np.empty(samples_per_packet, dtype=np.int32)
+                imag_int32 = np.empty(samples_per_packet, dtype=np.int32)
             # Pre-allocate arrays for 16-bit processing
             if not is_24bit:
                 real_vals = np.empty(samples_per_packet, dtype=np.float32)
@@ -1190,19 +1196,26 @@ class CloudSDREmulator:
                 
                 # Convert samples to packet format
                 if is_24bit:
-                    # 24-bit conversion
-                    real_vals = np.real(iq_data) * scale_factor
-                    imag_vals = np.imag(iq_data) * scale_factor
-                    real_vals = np.clip(real_vals, -8388608, 8388607).astype(np.int32)
-                    imag_vals = np.clip(imag_vals, -8388608, 8388607).astype(np.int32)
+                    # Ultra-fast vectorized 24-bit conversion
+                    np.multiply(np.real(iq_data), scale_factor, out=real_vals_24)
+                    np.multiply(np.imag(iq_data), scale_factor, out=imag_vals_24) 
+                    np.clip(real_vals_24, -8388608, 8388607, out=real_vals_24)
+                    np.clip(imag_vals_24, -8388608, 8388607, out=imag_vals_24)
+                    np.round(real_vals_24, out=real_vals_24)
+                    np.round(imag_vals_24, out=imag_vals_24)
+                    real_int32[:] = real_vals_24.astype(np.int32)
+                    imag_int32[:] = imag_vals_24.astype(np.int32)
                     
-                    # Pack 24-bit samples
+                    # Convert to bytes and extract 24-bit portions (vectorized)
+                    real_bytes = real_int32.astype('<i4').tobytes()
+                    imag_bytes = imag_int32.astype('<i4').tobytes()
+                    
+                    # Interleave 24-bit samples efficiently  
                     for i in range(len(iq_data)):
                         idx = i * 6
-                        i_val = int(real_vals[i])
-                        q_val = int(imag_vals[i])
-                        data_buffer[idx:idx+3] = i_val.to_bytes(4, 'little', signed=True)[:3]
-                        data_buffer[idx+3:idx+6] = q_val.to_bytes(4, 'little', signed=True)[:3]
+                        real_start = i * 4
+                        data_buffer[idx:idx+3] = real_bytes[real_start:real_start+3]
+                        data_buffer[idx+3:idx+6] = imag_bytes[real_start:real_start+3]
                 else:
                     # 16-bit conversion
                     np.multiply(np.real(iq_data), scale_factor, out=real_vals)
