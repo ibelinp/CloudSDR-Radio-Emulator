@@ -91,9 +91,11 @@ To change the maximum frequency, edit the frequency range response in `handle_re
 # Current: 2 GHz maximum
 0x00, 0x94, 0x35, 0x77, 0x00, 0x00, 0x00, 0x00, # Max freq: 2000000000 Hz = 2 GHz
 
-# Example: 6 GHz maximum  
-0x00, 0x1A, 0x07, 0x24, 0x01, 0x00, 0x00, 0x00, # Max freq: 6000000000 Hz = 6 GHz
+# Example: 1.7 GHz maximum (like real CloudSDR hardware)
+0x00, 0xf1, 0x53, 0x65, 0x00, 0x00, 0x00, 0x00, # Max freq: 1700000000 Hz = 1.7 GHz
 ```
+
+**Note:** Higher frequencies may not work due to SpectraVue's 32-bit frequency limitations.
 
 ### UDP Data Generation
 
