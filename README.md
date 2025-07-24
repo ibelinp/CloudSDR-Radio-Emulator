@@ -86,11 +86,16 @@ python cloudsdr_emulator.py -p 50001
 
 1. Start the emulator
 2. In SpectraVue, configure for **CloudSDR radio mode**
-3. Connect to `localhost:50000` (or your custom port)
-4. SpectraVue will detect the emulator as CloudSDR hardware
-5. Full 0-2 GHz frequency range will be available*
+3. In the CloudSDR dialog, manually enter:
+   - **IP Address:** `127.0.0.1` (localhost)
+   - **Port:** `50000` (or your custom port)
+4. Connect to the emulator
+5. SpectraVue will detect the emulator as CloudSDR hardware
+6. Full 0-2 GHz frequency range will be available*
 
-*Note: Higher frequencies may require external radio commands due to SpectraVue's 32-bit frequency limitations.
+**Note:** Auto-discovery ("Find" button) is not currently implemented. SpectraVue's auto-discovery uses broadcast messages that CloudSDR hardware responds to with its IP address. This feature could be added in future versions.
+
+*Higher frequencies may require external radio commands due to SpectraVue's 32-bit frequency limitations.
 
 ## Configuration
 
@@ -188,6 +193,7 @@ The emulator implements the CloudSDR Interface Specification with these key feat
 ## Contributing
 
 Contributions welcome! Areas of interest:
+- **Auto-discovery feature** - Implement broadcast message handling for SpectraVue's "Find" button
 - Additional SDR hardware bridges
 - **Protocol enhancements** - Implement missing control items from CloudSdrIQInterfaceSpec009.pdf
 - Performance optimizations
