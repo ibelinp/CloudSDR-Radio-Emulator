@@ -32,6 +32,41 @@ except ImportError:
     UHD_AVAILABLE = False
     print("⚠️  UHD Python bindings not found - running in simulation mode")
 
+# =============================================================================
+# SPECTRAVUE TO B210 GAIN MAPPING CONFIGURATION
+# =============================================================================
+"""
+SpectraVue sends gain commands via CI_RX_RF_GAIN (0x0038) using these values:
+- 0dB   (0x00) - Maximum sensitivity
+- -10dB (0xF6) - High sensitivity  
+- -20dB (0xEC) - Medium sensitivity
+- -30dB (0xE2) - Low sensitivity
+
+These are mapped to optimal B210 hardware gain values (0-76dB range):
+- B210 gain selection balances sensitivity vs noise performance
+- Values chosen based on Ettus recommendations and practical RF usage
+- All gain settings are safe for B210 hardware
+"""
+
+# SpectraVue gain levels (signed 8-bit values)
+SPECTRAVUE_GAIN_0DB = 0      # 0x00
+SPECTRAVUE_GAIN_10DB = -10   # 0xF6  
+SPECTRAVUE_GAIN_20DB = -20   # 0xEC
+SPECTRAVUE_GAIN_30DB = -30   # 0xE2
+
+# B210 hardware gain mappings (0-76dB range)
+B210_GAIN_MAP = {
+    SPECTRAVUE_GAIN_0DB:  60,   # High sensitivity for weak signals
+    SPECTRAVUE_GAIN_10DB: 45,   # Good sensitivity, reduced noise
+    SPECTRAVUE_GAIN_20DB: 30,   # Medium sensitivity for average signals  
+    SPECTRAVUE_GAIN_30DB: 15,   # Low sensitivity for strong signals
+}
+
+# Default B210 gain if SpectraVue sends unexpected value
+DEFAULT_B210_GAIN = 45  # Safe middle-ground value
+
+# =============================================================================
+
 class B210Interface:
     """
     Interface to USRP B210 hardware with professional streaming architecture.
@@ -564,6 +599,7 @@ class CloudSDREmulator:
         print(f"📡 Listening on {self.host}:{self.port}")
         print("✅ Professional streaming architecture")
         print("✅ CloudSDR protocol emulation")
+        print("✅ SpectraVue gain control support")
         print("✅ Ready for SpectraVue connection...")
         print("=" * 50)
         print()
@@ -702,6 +738,34 @@ class CloudSDREmulator:
                 if self.verbose >= 1:
                     self.logger.info(f"B210 Sample rate: {rate/1e6:.6f} MHz")
                     
+        elif ci_code == 0x0038:  # CI_RX_RF_GAIN
+            if len(params) >= 2:
+                channel = params[0]  # Channel ID (ignored)
+                spectravue_gain = struct.unpack('<b', params[1:2])[0]  # Signed 8-bit gain
+                
+                # Map SpectraVue gain to B210 hardware gain
+                if spectravue_gain in B210_GAIN_MAP:
+                    b210_gain = B210_GAIN_MAP[spectravue_gain]
+                    gain_desc = f"SpectraVue {spectravue_gain}dB → B210 {b210_gain}dB"
+                else:
+                    b210_gain = DEFAULT_B210_GAIN
+                    gain_desc = f"SpectraVue {spectravue_gain}dB (unknown) → B210 {b210_gain}dB (default)"
+                    self.logger.warning(f"Unknown SpectraVue gain value: {spectravue_gain}dB, using default B210 gain: {b210_gain}dB")
+                
+                # Apply gain change to B210 if significant
+                old_gain = self.receiver_settings['rf_gain']
+                self.receiver_settings['rf_gain'] = b210_gain
+                
+                if abs(b210_gain - old_gain) > 0.5:  # Significant change
+                    self.b210.configure(
+                        self.receiver_settings['sample_rate'],
+                        self.receiver_settings['frequency'],
+                        b210_gain
+                    )
+                
+                if self.verbose >= 1:
+                    self.logger.info(f"🎛️ Gain Control: {gain_desc}")
+                    
         elif ci_code == 0x0018:  # CI_RX_STATE
             if len(params) >= 4:
                 data_type = params[0]
@@ -804,6 +868,23 @@ class CloudSDREmulator:
             freq_bytes = struct.pack('<Q', freq)
             response_data = struct.pack('<HB', ci_code, channel) + freq_bytes
             
+        elif ci_code == 0x0038:  # CI_RX_RF_GAIN
+            if len(params) >= 1:
+                channel = params[0]
+                # Return current B210 gain mapped back to SpectraVue format
+                current_b210_gain = self.receiver_settings['rf_gain']
+                
+                # Find closest SpectraVue gain level
+                closest_spectravue_gain = SPECTRAVUE_GAIN_0DB
+                min_diff = float('inf')
+                for sv_gain, b210_gain in B210_GAIN_MAP.items():
+                    diff = abs(b210_gain - current_b210_gain)
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_spectravue_gain = sv_gain
+                
+                response_data = struct.pack('<HBb', ci_code, channel, closest_spectravue_gain)
+                
         elif ci_code == 0x00B0:  # CI_RX_AD_INPUT_SAMPLE_RATE_CAL
             if len(params) >= 1:
                 channel = params[0]
@@ -1145,6 +1226,7 @@ def main():
     print(f"🔗 Server: {args.host}:{args.port}")
     print("✅ Professional streaming architecture")
     print("✅ CloudSDR protocol emulation")
+    print("✅ SpectraVue gain control support")
     print("✅ Supports standard CloudSDR sample rates")
     print("=" * 60)
     
@@ -1152,6 +1234,12 @@ def main():
         print("⚠️  UHD not found - running in simulation mode")
         print("   Install: conda install -c conda-forge gnuradio")
     
+    print()
+    print("🎛️ SpectraVue Gain Control Mapping:")
+    print(f"   0dB  → {B210_GAIN_MAP[SPECTRAVUE_GAIN_0DB]}dB B210 (High sensitivity)")
+    print(f"   -10dB → {B210_GAIN_MAP[SPECTRAVUE_GAIN_10DB]}dB B210 (Good sensitivity)")  
+    print(f"   -20dB → {B210_GAIN_MAP[SPECTRAVUE_GAIN_20DB]}dB B210 (Medium sensitivity)")
+    print(f"   -30dB → {B210_GAIN_MAP[SPECTRAVUE_GAIN_30DB]}dB B210 (Low sensitivity)")
     print()
     
     bridge = CloudSDREmulator(host=args.host, port=args.port, verbose=args.verbose)
