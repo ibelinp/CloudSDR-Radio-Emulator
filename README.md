@@ -140,6 +140,10 @@ with open('iq_file.bin', 'rb') as f:
     # Handle loop/repeat as needed
 ```
 
+**Important:** File playback must match the configured sample rate for proper timing. SpectraVue expects real-time data flow, so the emulator must stream file data at exactly the sample rate specified by SpectraVue (e.g., 2.048 MHz). 
+
+**Better approach:** Use I/Q data from other clocked sources (real SDRs, signal generators) that naturally produce data at the correct sample rates, rather than trying to time file playback precisely.
+
 ## Protocol Details
 
 The emulator implements the CloudSDR Interface Specification with these key features:
@@ -148,6 +152,8 @@ The emulator implements the CloudSDR Interface Specification with these key feat
 - **Message Types**: SET, REQUEST, and REQUEST_RANGE operations  
 - **Frequency Encoding**: 8-byte frequency fields supporting up to exahertz range
 - **UDP Streaming**: Configurable 16-bit/24-bit I/Q data with proper packet headers
+
+**Note:** Not all messages from SpectraVue are currently processed by the emulator. Additional control items and message types can be implemented by referring to the `CloudSdrIQInterfaceSpec009.pdf` specification document included in this repository.
 
 ## Troubleshooting
 
@@ -170,7 +176,7 @@ The emulator implements the CloudSDR Interface Specification with these key feat
 
 Contributions welcome! Areas of interest:
 - Additional SDR hardware bridges
-- Protocol enhancements
+- **Protocol enhancements** - Implement missing control items from CloudSdrIQInterfaceSpec009.pdf
 - Performance optimizations
 - Documentation improvements
 
