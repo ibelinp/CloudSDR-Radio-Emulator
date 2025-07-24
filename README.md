@@ -46,6 +46,12 @@ Connect SpectraVue to alternative data sources:
 
 ## Quick Start
 
+### Prerequisites
+
+**SpectraVue Software:**
+- SpectraVue 3.44 is included in this repository (`SpectraVueSetup344.exe`)
+- Or download the latest version from [RFSPACE](http://www.rfspace.com/)
+
 ### Installation
 
 ```bash
@@ -53,7 +59,12 @@ git clone https://github.com/ibelinp/CloudSDR-Radio-Emulator.git
 cd CloudSDR-Radio-Emulator
 ```
 
-No additional dependencies required - uses Python standard library only.
+**Install SpectraVue:**
+1. Run `SpectraVueSetup344.exe` (included in repository)
+2. Follow installation wizard
+3. Configure for **CloudSDR radio mode**
+
+No additional dependencies required for the emulator - uses Python standard library only.
 
 ### Basic Usage
 
@@ -195,6 +206,8 @@ MIT License - see LICENSE file for details.
 - CloudSDR protocol reverse engineering
 - SpectraVue compatibility testing
 - SDR community feedback and suggestions
+
+**Note:** This repository includes SpectraVue software, courtesy of RFSPACE.
 
 ---
 
