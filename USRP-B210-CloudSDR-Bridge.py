@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-USRP B210 CloudSDR Bridge
+USRP B210 CloudSDR Bridge v1.0
 Connects USRP B210 to SpectraVue via CloudSDR protocol emulation
 
 This bridge allows SpectraVue to connect to a USRP B210 as if it were a CloudSDR device.
-Features professional double-buffering to handle USB bulk transfer bursts and precise
-UDP timing to deliver stable sample rates to SpectraVue.
+Features professional double-buffering, adaptive master clock selection, and complete
+SpectraVue compatibility including gain controls and frequency offset support.
 
 Author: Integration based on Pieter Ibelings' CloudSDR Emulator
 License: MIT License
+Version: 1.0
 """
 
 import socket
@@ -31,6 +32,27 @@ try:
 except ImportError:
     UHD_AVAILABLE = False
     print("⚠️  UHD Python bindings not found - running in simulation mode")
+
+# =============================================================================
+# FREQUENCY OFFSET CONFIGURATION
+# =============================================================================
+"""
+SpectraVue limitation: Can only tune 0-2 GHz
+B210 capability: 70 MHz - 6 GHz
+
+Use --offset to access B210's full range beyond SpectraVue's 2 GHz limit:
+  --offset 0        → Normal operation (0-2 GHz)
+  --offset 2e9      → Access 2-4 GHz (SpectraVue 0-2GHz maps to B210 2-4GHz)  
+  --offset 4e9      → Access 4-6 GHz (SpectraVue 0-2GHz maps to B210 4-6GHz)
+
+Example: --offset 2.4e9
+  SpectraVue shows 100 MHz → B210 actually tunes to 2.5 GHz
+
+Safety: Validates final frequency is within B210 range (70 MHz - 6 GHz)
+"""
+
+# Global frequency offset (set via command line --offset)
+FREQUENCY_OFFSET = 0.0  # Hz - Added to all SpectraVue frequencies
 
 # =============================================================================
 # SPECTRAVUE TO B210 GAIN MAPPING CONFIGURATION
@@ -72,19 +94,33 @@ class B210Interface:
     Interface to USRP B210 hardware with professional streaming architecture.
     
     Implements double-buffering to absorb USB burst transfers and provide
-    smooth sample delivery to UDP clients. Supports exact CloudSDR sample rates.
+    smooth sample delivery to UDP clients. Supports exact CloudSDR sample rates
+    with adaptive master clock selection.
     """
     
-    # CloudSDR standard rates based on 122.88 MHz master clock
-    # B210 uses 61.44 MHz master clock (122.88 MHz ÷ 2)
+    # Available B210 master clocks (adaptive selection for optimal decimation)
+    MASTER_CLOCKS = [
+        61.44e6,    # Primary CloudSDR clock
+        30.72e6,    # Half clock (for high decimation rates)
+        15.36e6,    # Quarter clock  
+        7.68e6,     # Eighth clock
+    ]
+    
+    # CloudSDR standard rates - now achievable with adaptive master clock
+    # Format: rate_hz: (preferred_master_clock, decimation)
     CLOUDSDR_EXACT_RATES = {
-        2048000:   30,    # 61.44 ÷ 30 = 2.048 MHz
-        1228800:   50,    # 61.44 ÷ 50 = 1.2288 MHz  
-        614400:    100,   # 61.44 ÷ 100 = 614.4 kHz
-        245760:    250,   # 61.44 ÷ 250 = 245.76 kHz
-        122880:    500,   # 61.44 ÷ 500 = 122.88 kHz
-        64000:     960,   # 61.44 ÷ 960 = 64 kHz
-        48000:     1280,  # 61.44 ÷ 1280 = 48 kHz
+        2048000:   (61.44e6, 30),     # 61.44 ÷ 30 = 2.048 MHz
+        1228800:   (61.44e6, 50),     # 61.44 ÷ 50 = 1.2288 MHz  
+        614400:    (61.44e6, 100),    # 61.44 ÷ 100 = 614.4 kHz
+        495483:    (61.44e6, 124),    # 61.44 ÷ 124 = 495.483 kHz
+        370120:    (61.44e6, 166),    # 61.44 ÷ 166 = 370.120 kHz
+        245760:    (61.44e6, 250),    # 61.44 ÷ 250 = 245.76 kHz
+        122880:    (61.44e6, 500),    # 61.44 ÷ 500 = 122.88 kHz
+        64000:     (30.72e6, 480),    # 30.72 ÷ 480 = 64 kHz
+        48000:     (15.36e6, 320),    # 15.36 ÷ 320 = 48 kHz
+        34594:     (15.36e6, 444),    # 15.36 ÷ 444 = 34.594 kHz
+        30720:     (15.36e6, 500),    # 15.36 ÷ 500 = 30.72 kHz
+        16000:     (7.68e6, 480),     # 7.68 ÷ 480 = 16 kHz
     }
     
     def __init__(self, simulation_mode=False):
@@ -133,19 +169,40 @@ class B210Interface:
         # Statistics
         self.samples_generated = 0
         
+        # Current master clock (adaptive)
+        self.current_master_clock = 61.44e6
+        
+    def find_optimal_master_clock(self, target_rate):
+        """Find optimal master clock and decimation for target rate."""
+        for master_clock in self.MASTER_CLOCKS:
+            decimation = master_clock / target_rate
+            if 1 <= decimation <= 512 and abs(decimation - round(decimation)) < 0.001:
+                return master_clock, int(round(decimation))
+        return None, None
+        
     def get_exact_rate_config(self, requested_rate):
-        """Get exact B210 configuration for CloudSDR standard rate."""
+        """Get exact B210 configuration with adaptive master clock selection."""
         if requested_rate in self.CLOUDSDR_EXACT_RATES:
-            decimation = self.CLOUDSDR_EXACT_RATES[requested_rate]
-            exact_rate = 61.44e6 / decimation
-            return exact_rate, True
+            master_clock, decimation = self.CLOUDSDR_EXACT_RATES[requested_rate]
+            exact_rate = master_clock / decimation
+            
+            print(f"B210: Using master clock {master_clock/1e6:.2f} MHz, decimation {decimation}")
+            return exact_rate, master_clock, True
         else:
-            # Find closest standard rate
-            closest_rate = min(self.CLOUDSDR_EXACT_RATES.keys(), 
-                             key=lambda x: abs(x - requested_rate))
-            decimation = self.CLOUDSDR_EXACT_RATES[closest_rate]
-            exact_rate = 61.44e6 / decimation
-            return exact_rate, False
+            # Try to find optimal master clock for non-standard rate
+            master_clock, decimation = self.find_optimal_master_clock(requested_rate)
+            if master_clock is not None:
+                exact_rate = master_clock / decimation
+                print(f"B210: Custom rate using master clock {master_clock/1e6:.2f} MHz, decimation {decimation}")
+                return exact_rate, master_clock, False
+            else:
+                # Fallback to closest standard rate
+                closest_rate = min(self.CLOUDSDR_EXACT_RATES.keys(), 
+                                 key=lambda x: abs(x - requested_rate))
+                master_clock, decimation = self.CLOUDSDR_EXACT_RATES[closest_rate]
+                exact_rate = master_clock / decimation
+                print(f"B210: Fallback to closest rate {exact_rate/1e6:.6f} MHz")
+                return exact_rate, master_clock, False
         
     def initialize(self, device_args=""):
         """Initialize B210 hardware using UHD."""
@@ -175,8 +232,8 @@ class B210Interface:
             return True
     
     def configure(self, requested_sample_rate, center_freq, gain):
-        """Configure B210 for exact CloudSDR sample rates."""
-        exact_rate, is_exact = self.get_exact_rate_config(requested_sample_rate)
+        """Configure B210 with adaptive master clock for exact CloudSDR sample rates."""
+        exact_rate, master_clock, is_exact = self.get_exact_rate_config(requested_sample_rate)
         
         if is_exact:
             print(f"B210: EXACT CloudSDR rate - Requested: {requested_sample_rate/1e6:.6f} MHz → Exact: {exact_rate/1e6:.6f} MHz")
@@ -189,18 +246,22 @@ class B210Interface:
             self.sample_rate = exact_rate
             self.center_freq = center_freq
             self.gain = gain
+            self.current_master_clock = master_clock
             print("B210: Simulation configured")
             self._update_buffer_sizes()
             return True
         
         try:
-            # Set 61.44 MHz master clock for CloudSDR compatibility
-            self.usrp.set_master_clock_rate(61.44e6)
+            # Set adaptive master clock for optimal decimation
+            self.usrp.set_master_clock_rate(master_clock)
             actual_master_clock = self.usrp.get_master_clock_rate()
             print(f"   Master clock: {actual_master_clock/1e6:.2f} MHz")
             
-            if abs(actual_master_clock - 61.44e6) > 1000:
-                print(f"⚠️  Master clock error: Got {actual_master_clock/1e6:.2f} MHz (expected 61.44 MHz)")
+            if abs(actual_master_clock - master_clock) > 1000:
+                print(f"⚠️  Master clock error: Got {actual_master_clock/1e6:.2f} MHz (expected {master_clock/1e6:.2f} MHz)")
+            
+            # Store current master clock
+            self.current_master_clock = actual_master_clock
             
             # Configure RX channel A
             self.usrp.set_rx_subdev_spec(uhd.usrp.SubdevSpec("A:A"))
@@ -495,15 +556,20 @@ class CloudSDREmulator:
     software to connect to a USRP B210 transparently.
     """
     
-    def __init__(self, host: str = "localhost", port: int = 50000, verbose: int = 1):
+    def __init__(self, host: str = "localhost", port: int = 50000, verbose: int = 1, frequency_offset: float = 0.0):
         self.host = host
         self.port = port
         self.verbose = verbose
+        self.frequency_offset = frequency_offset
         self.tcp_socket = None
         self.udp_socket = None
         self.client_socket = None
         self.running = False
         self.capturing = False
+        
+        # Update global frequency offset
+        global FREQUENCY_OFFSET
+        FREQUENCY_OFFSET = frequency_offset
         
         self.b210 = B210Interface(simulation_mode=not UHD_AVAILABLE)
         
@@ -695,30 +761,36 @@ class CloudSDREmulator:
             if len(params) >= 6:
                 channel = params[0]
                 if len(params) >= 9:
-                    freq = struct.unpack('<Q', params[1:9])[0]
+                    spectravue_freq = struct.unpack('<Q', params[1:9])[0]
                 else:
-                    freq = struct.unpack('<Q', params[1:6] + b'\x00\x00\x00')[0]
+                    spectravue_freq = struct.unpack('<Q', params[1:6] + b'\x00\x00\x00')[0]
+                
+                # Apply frequency offset to get actual B210 frequency
+                actual_freq = spectravue_freq + self.frequency_offset
                 
                 # Validate B210 frequency range (70 MHz - 6 GHz)
-                if freq < 70e6:
-                    self.logger.warning(f"Frequency {freq/1e6:.3f} MHz below B210 range")
-                    freq = max(freq, 70e6)
-                elif freq > 6e9:
-                    self.logger.warning(f"Frequency {freq/1e6:.3f} MHz above B210 range")
-                    freq = min(freq, 6e9)
+                if actual_freq < 70e6:
+                    self.logger.warning(f"Final frequency {actual_freq/1e6:.3f} MHz below B210 range (70 MHz minimum)")
+                    actual_freq = max(actual_freq, 70e6)
+                elif actual_freq > 6e9:
+                    self.logger.warning(f"Final frequency {actual_freq/1e6:.3f} MHz above B210 range (6 GHz maximum)")
+                    actual_freq = min(actual_freq, 6e9)
                 
                 old_freq = self.receiver_settings['frequency']
-                self.receiver_settings['frequency'] = freq
+                self.receiver_settings['frequency'] = actual_freq
                 
-                if abs(freq - old_freq) > 1000:
+                if abs(actual_freq - old_freq) > 1000:
                     self.b210.configure(
                         self.receiver_settings['sample_rate'],
-                        freq,
+                        actual_freq,
                         self.receiver_settings['rf_gain']
                     )
                 
                 if self.verbose >= 1:
-                    self.logger.info(f"B210 Frequency: {freq/1e6:.6f} MHz")
+                    if self.frequency_offset > 0:
+                        self.logger.info(f"🔄 Frequency: SpectraVue {spectravue_freq/1e6:.3f} MHz + Offset {self.frequency_offset/1e6:.0f} MHz = B210 {actual_freq/1e6:.3f} MHz")
+                    else:
+                        self.logger.info(f"B210 Frequency: {actual_freq/1e6:.6f} MHz")
                     
         elif ci_code == 0x00B8:  # CI_RX_OUT_SAMPLE_RATE
             if len(params) >= 5:
@@ -864,8 +936,14 @@ class CloudSDREmulator:
             
         elif ci_code == 0x0020:  # CI_RX_FREQUENCY
             channel = params[0] if len(params) > 0 else 0
-            freq = self.receiver_settings['frequency']
-            freq_bytes = struct.pack('<Q', freq)
+            # Return the SpectraVue frequency (actual frequency - offset)
+            actual_freq = self.receiver_settings['frequency']
+            spectravue_freq = actual_freq - self.frequency_offset
+            
+            # Ensure SpectraVue frequency is non-negative
+            spectravue_freq = max(0, spectravue_freq)
+            
+            freq_bytes = struct.pack('<Q', int(spectravue_freq))
             response_data = struct.pack('<HB', ci_code, channel) + freq_bytes
             
         elif ci_code == 0x0038:  # CI_RX_RF_GAIN
@@ -1216,6 +1294,8 @@ def main():
                       help='TCP port to listen on')
     parser.add_argument('-d', '--device', type=str, default="",
                       help='UHD device arguments (e.g., "serial=12345")')
+    parser.add_argument('--offset', type=float, default=0.0,
+                      help='Frequency offset in Hz (access B210 full range beyond SpectraVue 2GHz limit)')
     parser.add_argument('--host', type=str, default="localhost",
                       help='Host address to bind to')
     args = parser.parse_args()
@@ -1228,6 +1308,17 @@ def main():
     print("✅ CloudSDR protocol emulation")
     print("✅ SpectraVue gain control support")
     print("✅ Supports standard CloudSDR sample rates")
+    
+    # Show frequency offset configuration
+    if args.offset > 0:
+        print(f"🔄 Frequency Offset: +{args.offset/1e6:.0f} MHz")
+        print(f"   SpectraVue 0-2 GHz → B210 {args.offset/1e6:.0f}-{(args.offset + 2e9)/1e6:.0f} MHz")
+        max_sv_freq = min(2000, (6e9 - args.offset)/1e6)
+        if max_sv_freq < 2000:
+            print(f"   ⚠️  SpectraVue range limited to 0-{max_sv_freq:.0f} MHz (B210 6 GHz limit)")
+    else:
+        print("🔄 Frequency Offset: None (normal 0-2 GHz operation)")
+    
     print("=" * 60)
     
     if not UHD_AVAILABLE:
@@ -1242,7 +1333,7 @@ def main():
     print(f"   -30dB → {B210_GAIN_MAP[SPECTRAVUE_GAIN_30DB]}dB B210 (Low sensitivity)")
     print()
     
-    bridge = CloudSDREmulator(host=args.host, port=args.port, verbose=args.verbose)
+    bridge = CloudSDREmulator(host=args.host, port=args.port, verbose=args.verbose, frequency_offset=args.offset)
     
     try:
         bridge.start()
