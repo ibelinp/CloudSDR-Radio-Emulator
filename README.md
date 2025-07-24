@@ -9,11 +9,13 @@ The CloudSDR Emulator provides a complete software implementation of the CloudSD
 ## Features
 
 - ✅ **Full Protocol Support** - Implements CloudSDR TCP control protocol with exact hardware responses
-- ✅ **Extended Frequency Range** - Configurable frequency range (default: 0-2 GHz)
+- ✅ **Extended Frequency Range** - Configurable frequency range (default: 0-2 GHz)*
 - ✅ **UDP Data Streaming** - Generates realistic I/Q data with carrier signals and noise
-- ✅ **SpectraVue Compatible** - Works seamlessly with SpectraVue software
+- ✅ **SpectraVue Compatible** - Works with SpectraVue software set to CloudSDR radio mode
 - ✅ **Bridge Capability** - Can be modified to interface with other SDR hardware
 - ✅ **Flexible Configuration** - Multiple verbosity levels and easy parameter adjustment
+
+*Higher frequencies might need the use of external radio commands. SpectraVue has limits of 32 bits for direct frequency control.
 
 ## Use Cases
 
@@ -47,8 +49,8 @@ Connect SpectraVue to alternative data sources:
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/cloudsdr-emulator.git
-cd cloudsdr-emulator
+git clone https://github.com/ibelinp/CloudSDR-Radio-Emulator.git
+cd CloudSDR-Radio-Emulator
 ```
 
 No additional dependencies required - uses Python standard library only.
@@ -72,9 +74,12 @@ python cloudsdr_emulator.py -p 50001
 ### Connect SpectraVue
 
 1. Start the emulator
-2. In SpectraVue, connect to `localhost:50000` (or your custom port)
-3. SpectraVue will detect the emulator as CloudSDR hardware
-4. Full 0-2 GHz frequency range will be available
+2. In SpectraVue, configure for **CloudSDR radio mode**
+3. Connect to `localhost:50000` (or your custom port)
+4. SpectraVue will detect the emulator as CloudSDR hardware
+5. Full 0-2 GHz frequency range will be available*
+
+*Note: Higher frequencies may require external radio commands due to SpectraVue's 32-bit frequency limitations.
 
 ## Configuration
 
