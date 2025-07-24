@@ -62,16 +62,16 @@ This bridge enables **SpectraVue** and other CloudSDR-compatible software to con
 
 ```bash
 # Standard operation (0-2 GHz range)
-python b210_bridge.py
+python USRP-B210-CloudSDR-Bridge.py
 
 # Custom port
-python b210_bridge.py --port 51000
+python USRP-B210-CloudSDR-Bridge.py --port 51000
 
 # Verbose logging
-python b210_bridge.py --verbose 2
+python USRP-B210-CloudSDR-Bridge.py --verbose 2
 
 # Quiet mode
-python b210_bridge.py --verbose 0
+python USRP-B210-CloudSDR-Bridge.py --verbose 0
 ```
 
 ### Frequency Offset (Access Full 6 GHz Range)
@@ -80,13 +80,13 @@ SpectraVue is limited to 0-2 GHz, but the B210 covers 70 MHz - 6 GHz. Use freque
 
 ```bash
 # Access 2.4-4.4 GHz range
-python b210_bridge.py --offset 2.4e9
+python USRP-B210-CloudSDR-Bridge.py --offset 2.4e9
 
 # Access 4-6 GHz range  
-python b210_bridge.py --offset 4e9
+python USRP-B210-CloudSDR-Bridge.py --offset 4e9
 
 # VHF/UHF operation
-python b210_bridge.py --offset 400e6
+python USRP-B210-CloudSDR-Bridge.py --offset 400e6
 ```
 
 **How it works:**
@@ -97,10 +97,10 @@ python b210_bridge.py --offset 400e6
 
 ```bash
 # Specific B210 by serial number
-python b210_bridge.py --device "serial=12345"
+python USRP-B210-CloudSDR-Bridge.py --device "serial=12345"
 
 # Specific USB address
-python b210_bridge.py --device "addr=192.168.10.2"
+python USRP-B210-CloudSDR-Bridge.py --device "addr=192.168.10.2"
 ```
 
 ## SpectraVue Configuration
@@ -217,7 +217,7 @@ Can't tune above 2 GHz in SpectraVue
 ## Command Line Reference
 
 ```bash
-python b210_bridge.py [OPTIONS]
+python USRP-B210-CloudSDR-Bridge.py [OPTIONS]
 
 Options:
   -v, --verbose LEVEL     Verbosity: 0=quiet, 1=normal, 2=debug, 3=trace
@@ -252,7 +252,7 @@ python b210_bridge.py --offset 3.3e9
 ### Multi-User Setup
 ```bash
 # Bind to all interfaces for remote access
-python b210_bridge.py --host 0.0.0.0 --port 50001
+python USRP-B210-CloudSDR-Bridge.py --host 0.0.0.0 --port 50001
 ```
 
 ## Performance Tips
