@@ -231,7 +231,7 @@ class B210Interface:
             self.simulation_mode = True
             return True
     
-    def configure(self, requested_sample_rate, center_freq, gain):
+    def configure(self, requested_sample_rate, center_freq, gain, verbose=1):
         """Configure B210 with adaptive master clock for exact CloudSDR sample rates."""
         exact_rate, master_clock, is_exact = self.get_exact_rate_config(requested_sample_rate)
         
@@ -276,10 +276,14 @@ class B210Interface:
             else:
                 print(f"✅ EXACT rate achieved: {actual_rate:.6f} Hz")
             
-            # Set frequency and gain
-            tune_req = uhd.types.TuneRequest(center_freq)
+            # Set frequency with LO offset to avoid center notch and spurs
+            lo_offset = exact_rate * 0.6  # 0.6 × sample rate for optimal offset
+            tune_req = uhd.types.TuneRequest(center_freq, lo_offset)
             self.usrp.set_rx_freq(tune_req, 0)
             actual_freq = self.usrp.get_rx_freq(0)
+            
+            if verbose >= 2:
+                print(f"DEBUG: LO offset tuning - Target: {center_freq/1e6:.3f} MHz, LO offset: {lo_offset/1e6:.3f} MHz")
             
             self.usrp.set_rx_gain(gain, 0)
             actual_gain = self.usrp.get_rx_gain(0)
@@ -653,7 +657,8 @@ class CloudSDREmulator:
         self.b210.configure(
             self.receiver_settings['sample_rate'],
             self.receiver_settings['frequency'],
-            self.receiver_settings['rf_gain']
+            self.receiver_settings['rf_gain'],
+            self.verbose
         )
         
         # Start TCP server
@@ -804,7 +809,8 @@ class CloudSDREmulator:
                     self.b210.configure(
                         rate,
                         self.receiver_settings['frequency'],
-                        self.receiver_settings['rf_gain']
+                        self.receiver_settings['rf_gain'],
+                        self.verbose
                     )
                 
                 if self.verbose >= 1:
@@ -832,7 +838,8 @@ class CloudSDREmulator:
                     self.b210.configure(
                         self.receiver_settings['sample_rate'],
                         self.receiver_settings['frequency'],
-                        b210_gain
+                        b210_gain,
+                        self.verbose
                     )
                 
                 if self.verbose >= 1:
