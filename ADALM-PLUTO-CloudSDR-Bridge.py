@@ -1528,13 +1528,13 @@ class CloudSDREmulator:
             self.logger.info(f"UDP: {samples_per_packet} samples/packet, {packets_per_second:.1f} pps, {packet_interval*1000:.3f}ms interval")
             self.logger.info(f"Streaming PLUTO IQ -> SpectraVue at {udp_addr[0]}:{udp_addr[1]} ({mode_str} {size_str})")
 
-            # High-resolution timing
+            # Timing: we schedule each packet relative to a wall-clock anchor.
+            # If the thread gets stalled (CPU load, GC, etc.) we detect when
+            # we've fallen behind by more than max_behind and re-anchor rather
+            # than trying to burst-catch-up, which would cause rate spikes.
             start_time = time.perf_counter()
             next_packet_time = start_time
-
-            # Timing correction
-            timing_error_accumulator = 0.0
-            timing_correction_factor = 1.0
+            max_behind = packet_interval * 8  # Allow up to 8 packets of drift
 
             # Statistics
             samples_sent = 0
@@ -1645,27 +1645,18 @@ class CloudSDREmulator:
                     self.logger.error(f"Error sending UDP data: {e}")
                     break
 
-                # Timing correction
-                next_packet_time += packet_interval * timing_correction_factor
+                # Advance to next packet time
+                next_packet_time += packet_interval
 
-                # Adaptive timing correction
-                if packet_count % 1000 == 0:
-                    current_time = time.perf_counter()
-
-                    expected_time = start_time + (packet_count * packet_interval)
-                    actual_time = current_time
-                    timing_error = actual_time - expected_time
-                    timing_error_accumulator += timing_error
-
-                    if abs(timing_error_accumulator) > 0.01:  # More than 10ms error
-                        correction = -timing_error_accumulator / (packet_count * packet_interval)
-                        timing_correction_factor = 1.0 + (correction * 0.1)
-                        timing_correction_factor = max(0.95, min(1.05, timing_correction_factor))
-
-                        if self.verbose >= 2:
-                            self.logger.debug(f"Timing correction: {timing_correction_factor:.6f}")
-
-                        timing_error_accumulator *= 0.5
+                # If we've fallen too far behind wall clock (CPU stall, GC pause,
+                # etc.), re-anchor timing to now instead of burst-catching-up.
+                # A brief gap is better than a rate spike.
+                now = time.perf_counter()
+                if now - next_packet_time > max_behind:
+                    skipped = int((now - next_packet_time) / packet_interval)
+                    next_packet_time = now
+                    if self.verbose >= 1:
+                        self.logger.info(f"Timing: re-anchored (skipped {skipped} packet slots)")
 
         except Exception as e:
             self.logger.error(f"UDP sender error: {e}")
